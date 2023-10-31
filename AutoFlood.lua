@@ -10,13 +10,12 @@ local GetAddOnMetadata = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetad
 -- ===========================================
 
 local MAX_RATE = 10
-local isFloodActive = false
 
 --- Main script initialization
 --
 function AutoFlood_OnLoad()
 	AutoFlood_Frame:RegisterEvent("VARIABLES_LOADED")
-	AutoFlood_Frame.timeSinceLastUpdate = 0
+	AutoFlood_Frame.profiles = {}
 	AutoFlood_Frame:SetScript("OnEvent", AutoFlood_OnEvent)
 	AutoFlood_Frame:SetScript("OnUpdate", AutoFlood_OnUpdate)
 end
@@ -47,14 +46,24 @@ function AutoFlood_OnEvent(self, event)
 
 		-- Init configuration
 		AF_characterConfig = Mixin({
-			message = "AutoFlood " .. version,
-			channel = "say",
-			rate = 60,
+			{
+				rate = 60,
+				messages = {
+					"AutoFlood " .. version, "is running"
+				},
+				channels = {
+					"say",
+					"party"
+				}
+			}
 		}, oldConfig, AF_characterConfig or {})
 
 		-- Erase old configuration
 		AF_characterConfig.system = nil
 		AF_characterConfig.idChannel = nil
+		AF_characterConfig.rate = nil
+		AF_characterConfig.message = nil
+		AF_characterConfig.channel = nil
 		cleanOldConfig(characterId)
 
 		-- Display welcome message
@@ -66,32 +75,41 @@ end
 --- Enable flood!
 --
 function AutoFlood_On()
-	isFloodActive = true
 	AutoFlood_Info()
-	AutoFlood_Frame.timeSinceLastUpdate = AF_characterConfig.rate
+	for k, v in pairs(AF_characterConfig) do
+		AutoFlood_Frame[k]['timeSinceLastUpdate'] = v.rate
+		AutoFlood_Frame[k]['isActive'] = v.rate
+	end
 end
 
 --- Stop flood
 --
 function AutoFlood_Off()
 	DEFAULT_CHAT_FRAME:AddMessage(AUTOFLOOD_INACTIVE, 1, 1, 1)
-	isFloodActive = false
 end
 
 --- Frame update handler
 --
 function AutoFlood_OnUpdate(self, elapsed)
-	if not isFloodActive or MessageQueue.GetNumPendingMessages() > 0 then return end
-	AutoFlood_Frame.timeSinceLastUpdate = AutoFlood_Frame.timeSinceLastUpdate + elapsed
-	if AutoFlood_Frame.timeSinceLastUpdate > AF_characterConfig.rate then
-		local system, channelNumber = AutoFlood_GetChannel(AF_characterConfig.channel)
-		if system == nil then
-			local s = string.gsub("[AutoFlood] " .. AUTOFLOOD_ERR_CHAN, "CHANNEL", AF_characterConfig.channel)
-			DEFAULT_CHAT_FRAME:AddMessage(s, 1, 0, 0)
-		else
-			MessageQueue.SendChatMessage(AF_characterConfig.message, system, nil, channelNumber)
+	if MessageQueue.GetNumPendingMessages() > 0 then return end
+	for profileId, _ in pairs(AutoFlood_Frame.profiles) do
+		if AutoFlood_Frame[profileId].isActive then
+			AutoFlood_Frame[profileId].timeSinceLastUpdate = AutoFlood_Frame[profileId].timeSinceLastUpdate + elapsed
+			if AutoFlood_Frame[profileId].timeSinceLastUpdate > AF_characterConfig[profileId].rate then
+				for _, channel in pairs(AF_characterConfig[profileId].channels) do
+					local system, channelNumber = AutoFlood_GetChannel(channel)
+					if system == nil then
+						local s = string.gsub("[AutoFlood] " .. AUTOFLOOD_ERR_CHAN, "CHANNEL", message)
+						DEFAULT_CHAT_FRAME:AddMessage(s, 1, 0, 0)
+					else
+						for _, message in pairs(AF_characterConfig[profileId].messages) do
+							MessageQueue.SendChatMessage(message, system, nil, channelNumber)
+						end
+					end
+				end
+				AutoFlood_Frame[profileId].timeSinceLastUpdate = 0
+			end
 		end
-		AutoFlood_Frame.timeSinceLastUpdate = 0
 	end
 end
 
@@ -104,29 +122,124 @@ function AutoFlood_Info()
 		DEFAULT_CHAT_FRAME:AddMessage(AUTOFLOOD_INACTIVE, 1, 1, 1)
 	end
 
-	local s = AUTOFLOOD_STATS
-	s = string.gsub(s, "MESSAGE", AF_characterConfig.message)
-	s = string.gsub(s, "CHANNEL", AF_characterConfig.channel)
-	s = string.gsub(s, "RATE", AF_characterConfig.rate)
+	local s = AUTOFLOOD_STATS_PROFILE
+	s = string.gsub(s, "PROFILES_AMOUNT", #AF_characterConfig)
 	DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
-end
 
---- Set the message to send.
--- @param msg (string)
-function AutoFlood_SetMessage(msg)
-	if msg ~= "" then
-		AF_characterConfig.message = msg
+	local channels = ""
+	for _, config in pairs(AF_characterConfig) do
+		channels = ""
+		for _, channel in pairs(config.channels) do
+			channels = channels .. channel .. ", "
+		end
+		s = AUTOFLOOD_STATS
+		s = string.gsub(s, "CHANNELS", channels)
+		s = string.gsub(s, "RATE", config.rate)
+		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
+		for _, message in pairs(config.messages) do
+			DEFAULT_CHAT_FRAME:AddMessage(message, 1, 1, 1)
+		end
 	end
-	local s = string.gsub(AUTOFLOOD_MESSAGE, "MESSAGE", AF_characterConfig.message)
-	DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
 end
 
---- Set the amount of seconds between each message sending.
--- @param rate (number)
-function AutoFlood_SetRate(rate)
+function AutoFlood_AddProfile()
+	table.insert(
+		AF_characterConfig,
+		{
+			rate = 60,
+			messages = {
+				"AutoFlood " .. version, "is running"
+			},
+			channels = {
+				"say",
+				"party"
+			}
+		}
+	)
+end
+
+function AutoFlood_RemoveProfile(id)
+	AF_characterConfig[id] = nil
+end
+
+function AutoFlood_ListProfileMessages(profileId)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	for messageNumber, messageText in pairs(AF_characterConfig[profileId].messages) do
+		DEFAULT_CHAT_FRAME:AddMessage(messageNumber .. ": " .. messageText, 1, 1, 1)
+	end
+end
+
+function AutoFlood_AddMessageToProfile(profileId, messageText)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	if #AF_characterConfig[profileId].messages > 1 then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " already have 2 messages", 1, 1, 1)
+		return
+	end
+
+	table.insert(
+		AF_characterConfig[profileId].messages,
+		messageText
+	)
+end
+
+function AutoFlood_RemoveMessageFromProfile(profileId, messageId)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	AF_characterConfig[profileId].messages[messageId] = nil
+end
+
+function AutoFlood_ListProfileChannels(profileId)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	for channelId, channelNumber in pairs(AF_characterConfig[profileId].channels) do
+		DEFAULT_CHAT_FRAME:AddMessage(channelId .. ": " .. channelNumber, 1, 1, 1)
+	end
+end
+
+function AutoFlood_AddChannelToProfile(profileId, channelNumber)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	table.insert(
+			AF_characterConfig[profileId].channels,
+			channelNumber
+	)
+end
+
+function AutoFlood_RemoveChannelFromProfile(profileId, channelNumber)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
+	AF_characterConfig[profileId].channels[channelNumber] = nil
+end
+
+function AutoFlood_SetRate(profileId, rate)
+	if AF_characterConfig[profileId] == nil then
+		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+		return
+	end
+
 	if rate ~= nil and tonumber(rate) > 0 and rate ~= "" then rate = tonumber(rate) end
 	if rate >= MAX_RATE then
-		AF_characterConfig.rate = rate
+		AF_characterConfig[profileId].rate = rate
 		local s = string.gsub(AUTOFLOOD_RATE, "RATE", AF_characterConfig.rate)
 		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
 	else
@@ -160,58 +273,39 @@ function AutoFlood_GetChannel(channel)
 	return nil, nil, nil
 end
 
---- Set the event / system / channel type according fo the game channel /channel.
--- @param channel (string) Channel name, as prefixed by the slash.
-function AutoFlood_SetChannel(channel)
-	local system, _, channelName = AutoFlood_GetChannel(channel)
-	if system == nil then
-		-- Bad channel
-		local s = string.gsub(AUTOFLOOD_ERR_CHAN, "CHANNEL", channel)
-		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 0, 0)
-	else
-		-- Save channel setting
-		AF_characterConfig.channel = channelName
-		local s = string.gsub(AUTOFLOOD_CHANNEL, "CHANNEL", channelName)
-		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
-	end
-end
-
 -- ===========================================
 -- Slash command aliases
 -- ===========================================
 
---- /flood [on|off]
+--- /fl [on|off]
 -- Start / stop flood
 -- @param s (string)
-SlashCmdList["AUTOFLOOD"] = function(s)
-	if s == "on" then
-		AutoFlood_On()
-	elseif s == "off" then
-		AutoFlood_Off()
-	else
-		if isFloodActive then
-			AutoFlood_Off()
-		else
-			AutoFlood_On()
-		end
-	end
-end
-
--- /floodmessage <message>
--- Set the message to send
-SlashCmdList["AUTOFLOODSETMESSAGE"] = AutoFlood_SetMessage
-
--- /floodchan <channel>
--- Set the channel
-SlashCmdList["AUTOFLOODSETCHANNEL"] = AutoFlood_SetChannel
-
--- /floodrate <duration>
--- Set the period (in seconds)
-SlashCmdList["AUTOFLOODSETRATE"] = AutoFlood_SetRate
-
+SlashCmdList["AUTOFLOOD"] = AutoFlood_Info
 -- /floodinfo
 -- Display the parameters in chat window
 SlashCmdList["AUTOFLOODINFO"] = AutoFlood_Info
+
+-- /flpadd
+SlashCmdList["AUTOFLOODPADD"] = AutoFlood_AddProfile
+-- /flprm <profile_number>
+SlashCmdList["AUTOFLOODPRM"] = AutoFlood_RemoveProfile
+
+-- /flmlist <profile_number>
+SlashCmdList["AUTOFLOODMLIST"] = AutoFlood_ListProfileMessages
+-- /flmadd <profile_number> <message_text>
+SlashCmdList["AUTOFLOODMADD"] = AutoFlood_AddMessageToProfile
+-- /flmrm <profile_number> <message_id>
+SlashCmdList["AUTOFLOODMRM"] = AutoFlood_RemoveMessageFromProfile
+
+-- /flchanlist <profile_number>
+SlashCmdList["AUTOFLOODCHANLIST"] = AutoFlood_ListProfileChannels
+-- /flchanadd <profile_number> <channel>
+SlashCmdList["AUTOFLOODCHANADD"] = AutoFlood_AddChannelToProfile
+-- /flchanrm <profile_number> <channel>
+SlashCmdList["AUTOFLOODCHANRM"] = AutoFlood_RemoveChannelFromProfile
+
+-- /flrate <profile_number> <duration>
+SlashCmdList["AUTOFLOODSETRATE"] = AutoFlood_SetRate
 
 -- /floodhelp
 -- Display help in chat window
@@ -222,18 +316,22 @@ SlashCmdList["AUTOFLOODHELP"] = function()
 end
 
 -- Command aliases
-SLASH_AUTOFLOOD1 = "/flood"
-
-SLASH_AUTOFLOODSETMESSAGE1 = "/floodmessage"
-SLASH_AUTOFLOODSETMESSAGE2 = "/floodmsg"
-
-SLASH_AUTOFLOODSETCHANNEL1 = "/floodchannel"
-SLASH_AUTOFLOODSETCHANNEL2 = "/floodchan"
-
-SLASH_AUTOFLOODSETRATE1 = "/floodrate"
+SLASH_AUTOFLOOD1 = "/fl"
 
 SLASH_AUTOFLOODINFO1 = "/floodinfo"
-SLASH_AUTOFLOODINFO2 = "/floodconfig"
+
+SLASH_AUTOFLOODPADD1 = "/flpadd"
+SLASH_AUTOFLOODPRM1 = "/flprm"
+
+SLASH_AUTOFLOODMLIST1 = "/flmlist"
+SLASH_AUTOFLOODMADD1 = "/flmadd"
+SLASH_AUTOFLOODMRM1 = "/flmrm"
+
+SLASH_AUTOFLOODCHANLIST1 = "/flchanlist"
+SLASH_AUTOFLOODCHANADD1 = "/flchanadd"
+SLASH_AUTOFLOODCHANRM1 = "/flchanrm"
+
+SLASH_AUTOFLOODSETRATE1 = "/flrate"
 
 SLASH_AUTOFLOODHELP1 = "/floodhelp"
 SLASH_AUTOFLOODHELP2 = "/floodman"
