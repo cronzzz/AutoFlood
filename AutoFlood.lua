@@ -16,6 +16,7 @@ local MAX_RATE = 10
 function AutoFlood_OnLoad()
 	AutoFlood_Frame:RegisterEvent("VARIABLES_LOADED")
 	AutoFlood_Frame.profiles = {}
+	AutoFlood_Frame.currentProfile = 1
 	AutoFlood_Frame:SetScript("OnEvent", AutoFlood_OnEvent)
 	AutoFlood_Frame:SetScript("OnUpdate", AutoFlood_OnUpdate)
 end
@@ -72,42 +73,55 @@ function AutoFlood_OnEvent(self, event)
 	end
 end
 
---- Enable flood!
---
-function AutoFlood_On()
-	AutoFlood_Info()
-	for k, v in pairs(AF_characterConfig) do
-		AutoFlood_Frame[k]['timeSinceLastUpdate'] = v.rate
-		AutoFlood_Frame[k]['isActive'] = v.rate
+function AutoFlood_State(profileId)
+	if tonumber(profileId) == nil then
+		AutoFlood_Info()
+		return
 	end
-end
 
---- Stop flood
---
-function AutoFlood_Off()
-	DEFAULT_CHAT_FRAME:AddMessage(AUTOFLOOD_INACTIVE, 1, 1, 1)
+	if AF_characterConfig[tonumber(profileId)] == nil then
+		say("Profile does not exists")
+		return
+	end
+
+	if AutoFlood_Frame.profiles[tonumber(profileId)] == nil then
+		AutoFlood_Frame.profiles[tonumber(profileId)] = {
+			timeSinceLastUpdate = '0',
+			isActive = '0'
+		}
+	end
+
+	if AutoFlood_Frame.profiles[tonumber(profileId)].isActive == '1' then
+		AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate = '0'
+		AutoFlood_Frame.profiles[tonumber(profileId)].isActive = '0'
+		say("Profile " .. profileId .. " is disabled")
+	else
+		AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate = AF_characterConfig[tonumber(profileId)].rate
+		AutoFlood_Frame.profiles[tonumber(profileId)].isActive = '1'
+		say("Profile " .. profileId .. " is enabled")
+	end
 end
 
 --- Frame update handler
 --
 function AutoFlood_OnUpdate(self, elapsed)
 	if MessageQueue.GetNumPendingMessages() > 0 then return end
-	for profileId, _ in pairs(AutoFlood_Frame.profiles) do
-		if AutoFlood_Frame[profileId].isActive then
-			AutoFlood_Frame[profileId].timeSinceLastUpdate = AutoFlood_Frame[profileId].timeSinceLastUpdate + elapsed
-			if AutoFlood_Frame[profileId].timeSinceLastUpdate > AF_characterConfig[profileId].rate then
-				for _, channel in pairs(AF_characterConfig[profileId].channels) do
+	for profileId, _ in ipairs(AutoFlood_Frame.profiles) do
+		if AutoFlood_Frame.profiles[tonumber(profileId)].isActive == "1" then
+			AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate = AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate + elapsed
+			if AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate > AF_characterConfig[tonumber(profileId)].rate then
+				for _, channel in ipairs(AF_characterConfig[tonumber(profileId)].channels) do
 					local system, channelNumber = AutoFlood_GetChannel(channel)
 					if system == nil then
 						local s = string.gsub("[AutoFlood] " .. AUTOFLOOD_ERR_CHAN, "CHANNEL", message)
 						DEFAULT_CHAT_FRAME:AddMessage(s, 1, 0, 0)
 					else
-						for _, message in pairs(AF_characterConfig[profileId].messages) do
+						for _, message in pairs(AF_characterConfig[tonumber(profileId)].messages) do
 							MessageQueue.SendChatMessage(message, system, nil, channelNumber)
 						end
 					end
 				end
-				AutoFlood_Frame[profileId].timeSinceLastUpdate = 0
+				AutoFlood_Frame.profiles[tonumber(profileId)].timeSinceLastUpdate = 0
 			end
 		end
 	end
@@ -116,18 +130,27 @@ end
 --- Show parameters
 --
 function AutoFlood_Info()
-	if isFloodActive then
-		DEFAULT_CHAT_FRAME:AddMessage(AUTOFLOOD_ACTIVE, 1, 1, 1)
-	else
-		DEFAULT_CHAT_FRAME:AddMessage(AUTOFLOOD_INACTIVE, 1, 1, 1)
-	end
-
 	local s = AUTOFLOOD_STATS_PROFILE
 	s = string.gsub(s, "PROFILES_AMOUNT", #AF_characterConfig)
-	DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
+	s = string.gsub(s, "CURRENT_PROFILE", AutoFlood_Frame.currentProfile or "0")
+	say(s, "false")
 
 	local channels = ""
-	for _, config in pairs(AF_characterConfig) do
+	local state = "not running"
+	for profileId, config in ipairs(AF_characterConfig) do
+		if AutoFlood_Frame.profiles[tonumber(profileId)] == nil then
+			AutoFlood_Frame.profiles[tonumber(profileId)] = {
+				isActive = "0",
+				timeSinceLastUpdate = 0
+			}
+		end
+
+		if AutoFlood_Frame.profiles[tonumber(profileId)].isActive == "1" then
+			state = " (running) "
+		else
+			state = " (not running) "
+		end
+		say("Profile " .. profileId .. state .. ":", "false")
 		channels = ""
 		for _, channel in pairs(config.channels) do
 			channels = channels .. channel .. ", "
@@ -135,11 +158,21 @@ function AutoFlood_Info()
 		s = AUTOFLOOD_STATS
 		s = string.gsub(s, "CHANNELS", channels)
 		s = string.gsub(s, "RATE", config.rate)
-		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
-		for _, message in pairs(config.messages) do
-			DEFAULT_CHAT_FRAME:AddMessage(message, 1, 1, 1)
+		say(s, "false")
+		for messageNumber, message in pairs(config.messages) do
+			say(messageNumber .. ": " .. message, "false")
 		end
 	end
+	say("")
+end
+
+function AutoFlood_SelectProfile(profileId)
+	if AF_characterConfig[tonumber(profileId)] == nil then
+		say("Profile " .. profileId .. " does not exists")
+		return
+	end
+	AutoFlood_Frame.currentProfile = profileId
+	say("Current profile is " .. profileId)
 end
 
 function AutoFlood_AddProfile()
@@ -148,7 +181,8 @@ function AutoFlood_AddProfile()
 		{
 			rate = 60,
 			messages = {
-				"AutoFlood " .. version, "is running"
+				"AutoFlood ",
+				"is running"
 			},
 			channels = {
 				"say",
@@ -156,95 +190,92 @@ function AutoFlood_AddProfile()
 			}
 		}
 	)
+	say("Added")
+end
+
+function say(text, nl)
+	nl = (nl == true)
+	DEFAULT_CHAT_FRAME:AddMessage(text, 1, 1, 1)
+	if nl then
+		DEFAULT_CHAT_FRAME:AddMessage("", 1, 1, 1)
+	end
 end
 
 function AutoFlood_RemoveProfile(id)
-	AF_characterConfig[id] = nil
-end
-
-function AutoFlood_ListProfileMessages(profileId)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+	if AF_characterConfig[tonumber(id)] == nil then
+		say("Profile does not exists")
 		return
 	end
-
-	for messageNumber, messageText in pairs(AF_characterConfig[profileId].messages) do
-		DEFAULT_CHAT_FRAME:AddMessage(messageNumber .. ": " .. messageText, 1, 1, 1)
+	AF_characterConfig[tonumber(id)] = nil
+	AutoFlood_Frame.profiles[tonumber(id)] = nil
+	if AutoFlood_Frame.currentProfile == id then
+		AutoFlood_Frame.currentProfile = nil
 	end
+	say("Done")
 end
 
-function AutoFlood_AddMessageToProfile(profileId, messageText)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
-		return
+function AutoFlood_ListProfileMessages()
+	for messageNumber, messageText in pairs(AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].messages) do
+		say(messageNumber .. ": " .. messageText, "false")
 	end
+	say("")
+end
 
-	if #AF_characterConfig[profileId].messages > 1 then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " already have 2 messages", 1, 1, 1)
+function AutoFlood_AddMessageToProfile(messageText)
+	if #AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].messages > 1 then
+		say("Profile " .. AutoFlood_Frame.currentProfile .. " already has 2 messages", "false")
 		return
 	end
 
 	table.insert(
-		AF_characterConfig[profileId].messages,
+		AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].messages,
 		messageText
 	)
+	say("Added")
 end
 
-function AutoFlood_RemoveMessageFromProfile(profileId, messageId)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+function AutoFlood_RemoveMessageFromProfile(messageId)
+	if AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].messages[tonumber(messageId)] == nil then
+		say("Message does not exists")
 		return
 	end
-
-	AF_characterConfig[profileId].messages[messageId] = nil
+	AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].messages[tonumber(messageId)] = nil
+	say("Done")
 end
 
-function AutoFlood_ListProfileChannels(profileId)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
-		return
+function AutoFlood_ListProfileChannels()
+	for channelId, channelNumber in pairs(AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].channels) do
+		say(channelId .. ": " .. channelNumber, "false")
 	end
-
-	for channelId, channelNumber in pairs(AF_characterConfig[profileId].channels) do
-		DEFAULT_CHAT_FRAME:AddMessage(channelId .. ": " .. channelNumber, 1, 1, 1)
-	end
+	say("")
 end
 
-function AutoFlood_AddChannelToProfile(profileId, channelNumber)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
-		return
-	end
-
+function AutoFlood_AddChannelToProfile(channelNumber)
 	table.insert(
-			AF_characterConfig[profileId].channels,
-			channelNumber
+		AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].channels,
+		channelNumber
 	)
+	say("Channel " .. channelNumber .. " added to profile " .. AutoFlood_Frame.currentProfile)
 end
 
-function AutoFlood_RemoveChannelFromProfile(profileId, channelNumber)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
+function AutoFlood_RemoveChannelFromProfile(channelNumber)
+	if AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].channels[tonumber(channelNumber)] == nil then
+		say("Channel does not exists in this profile")
 		return
 	end
-
-	AF_characterConfig[profileId].channels[channelNumber] = nil
+	AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].channels[tonumber(channelNumber)] = nil
+	say("Done")
 end
 
-function AutoFlood_SetRate(profileId, rate)
-	if AF_characterConfig[profileId] == nil then
-		DEFAULT_CHAT_FRAME:AddMessage("Profile " .. profileId .. " does not exists", 1, 1, 1)
-		return
-	end
-
+function AutoFlood_SetRate(rate)
 	if rate ~= nil and tonumber(rate) > 0 and rate ~= "" then rate = tonumber(rate) end
 	if rate >= MAX_RATE then
-		AF_characterConfig[profileId].rate = rate
-		local s = string.gsub(AUTOFLOOD_RATE, "RATE", AF_characterConfig.rate)
-		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 1, 1)
+		AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].rate = rate
+		local s = string.gsub(AUTOFLOOD_RATE, "RATE", AF_characterConfig[tonumber(AutoFlood_Frame.currentProfile)].rate)
+		say(s)
 	else
 		local s = string.gsub(AUTOFLOOD_ERR_RATE, "RATE", MAX_RATE)
-		DEFAULT_CHAT_FRAME:AddMessage(s, 1, 0, 0)
+		say(s)
 	end
 end
 
@@ -277,14 +308,15 @@ end
 -- Slash command aliases
 -- ===========================================
 
---- /fl [on|off]
--- Start / stop flood
+--- /fl <profile_number>
 -- @param s (string)
-SlashCmdList["AUTOFLOOD"] = AutoFlood_Info
+SlashCmdList["AUTOFLOOD"] = AutoFlood_State
 -- /floodinfo
 -- Display the parameters in chat window
 SlashCmdList["AUTOFLOODINFO"] = AutoFlood_Info
 
+-- /flpselect
+SlashCmdList["AUTOFLOODPSELECT"] = AutoFlood_SelectProfile
 -- /flpadd
 SlashCmdList["AUTOFLOODPADD"] = AutoFlood_AddProfile
 -- /flprm <profile_number>
@@ -318,8 +350,9 @@ end
 -- Command aliases
 SLASH_AUTOFLOOD1 = "/fl"
 
-SLASH_AUTOFLOODINFO1 = "/floodinfo"
+SLASH_AUTOFLOODINFO1 = "/flinfo"
 
+SLASH_AUTOFLOODPSELECT1 = "/flpselect"
 SLASH_AUTOFLOODPADD1 = "/flpadd"
 SLASH_AUTOFLOODPRM1 = "/flprm"
 

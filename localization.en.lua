@@ -4,7 +4,7 @@
 
 AUTOFLOOD_LOAD = "AutoFlood (custom) loaded. Type /floodhelp for help."
 
-AUTOFLOOD_STATS_PROFILE = "PROFILES_AMOUNT is/are set"
+AUTOFLOOD_STATS_PROFILE = "PROFILES_AMOUNT profiles are set, current profile is: CURRENT_PROFILE"
 AUTOFLOOD_STATS = "Following messages are send into CHANNELS every RATE seconds:"
 
 AUTOFLOOD_MESSAGE = "The message is now \"MESSAGE\"."
